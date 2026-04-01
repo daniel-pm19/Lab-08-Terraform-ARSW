@@ -195,41 +195,41 @@ After performing the procedure, we clean up the terraform using the following co
 terraform destroy -var-file=env/dev.tfvars
 ```
 
-## Preguntas de reflexión
-- ¿Por qué L4 LB vs Application Gateway (L7) en tu caso? ¿Qué cambiaría? 
-  - R: Se usa un LB L4 y no un L7 debido a que este opera a nivel de capa de transporte y no analiza el contenido HTTP, lo que quiere decir que es mas simple y mas economico que uno de capa de aplicacion y pues para el laboratorio es mas que suficiente debido a que solo se necesita distribuir trafico HTTP. A su vez, este tiene menos complejidad a la hora de configurarlo. En comparacion con uno L7 es que este opera a nivel de aplicacion, lo que permite un routing basado en URL, terminacion TLS, mayor proteccion contra ataques ciberneticos. Lo ideal seria utilizarlo en caso de que hayan multiples aplicaciones detras del LB, seguridad avanzada y enrutamientos inteligentes.
+## Reflection Questions
+- Why use an L4 LB instead of an L7 Application Gateway in your case? What would change?
 
-- ¿Qué implicaciones de seguridad tiene exponer 22/TCP? ¿Cómo mitigarlas?
+- A: An L4 LB is used instead of an L7 because it operates at the transport layer and doesn't parse HTTP content. This means it's simpler and more economical than an application-layer LB, and for the lab, it's more than sufficient since we only need to distribute HTTP traffic. It's also less complex to configure. In contrast, an L7 LB operates at the application layer, allowing for URL-based routing, TLS termination, and greater protection against cyberattacks. Ideally, it would be used when there are multiple applications behind the LB, requiring advanced security and intelligent routing.
 
-  Riesgos:
-  - Ataques de fuerza bruta
-  - Escaneo automático de bots
-  - Intentos de acceso no autorizado
-  - Posible explotación de vulnerabilidades del sistema
+- What are the security implications of exposing 22/TCP? How can these be mitigated?
 
-  Como mitigarlos?
+  Risks:
+  - Brute-force attacks
+  - Automated bot scanning
+  - Unauthorized access attempts
+  - Potential exploitation of system vulnerabilities
 
-  - Restringir el acceso a una unica IP
-  - Autenticacion por SSH
-  - Usar una VPN o una red privada
-  - Monitoreo y registro de accesos
-  - Desabilitar login con password y root login
+  How to mitigate them?
+  - Restrict access to a single IP address
+  - Authenticate via SSH
+  - Use a VPN or a private network
+  - Monitor and log access
+  - Disable password and root login
 
-- ¿Qué mejoras harías si esto fuera **producción**? (resiliencia, autoscaling, observabilidad).
+- What improvements would you make if this were in **production**? (resilience, autoscaling, observability).
 
-  Resiliencia
-  - Distribuir VMs en múltiples zonas
-  - Health probes más robustos (HTTP y TCP)
-  - Implementar failover automático
-  - Backups y snapshots de VMs
+  Resilience
+  - Distribute VMs across multiple zones
+  - More robust health probes (HTTP and TCP)
+  - Implement automatic failover
+  - VM backups and snapshots
 
   Autoscaling
-  - Reemplazar VMs por VM Scale Set (VMSS)
-  - Configurar escalado por CPU / requests y escalado automático
-  - Integración con Load Balancer o Application Gateway
+  - Replace VMs with VM Scale Sets (VMSS)
+  - Configure CPU/request scaling and automatic scaling
+  - Integration with Load Balancers or Application Gateways
 
-  Observabilidad
+  Observability
   - Azure Monitor + Log Analytics
-  - Logs centralizados
-  - Alertas
+  - Centralized logs
+  - Alerts
   - Dashboards (Azure Dashboard)
