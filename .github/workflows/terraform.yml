@@ -1,0 +1,198 @@
+name: Terraform Azure
+
+  on:
+    pull_request:
+      paths:
+        - "infra/**"
+        - "modules/**"
+        - ".github/workflows/terraform.yml"
+    workflow_dispatch:
+
+  permissions:
+    contents: read
+    id-token: write
+    pull-requests: write
+
+  concurrency:
+    group: terraform-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+  defaults:
+    run:
+      shell: bash
+      working-directory: infra
+
+  env:
+    TF_IN_AUTOMATION: true
+    ARM_USE_OIDC: true
+    ARM_USE_AZUREAD: true
+    ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+    ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+    ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  jobs:
+    plan:
+      if: github.event_name == 'pull_request'
+      runs-on: ubuntu-latest
+
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+
+        - name: Setup Terraform
+          uses: hashicorp/setup-terraform@v3
+          with:
+            terraform_version: 1.6.6
+
+        - name: Azure Login (OIDC)
+          uses: azure/login@v2
+          with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+        - name: Materialize SSH public key
+          run: |
+            mkdir -p /home/runner/.ssh
+            printf '%s\n' "${{ secrets.SSH_PUBLIC_KEY }}" > /home/runner/.ssh/
+  id_ed25519.pub
+            chmod 600 /home/runner/.ssh/id_ed25519.pub
+
+        - name: Terraform Init
+          id: init
+          run: terraform init -input=false -backend-config=backend.hcl
+
+        - name: Terraform Fmt
+          id: fmt
+          run: terraform fmt -check -recursive
+
+        - name: Terraform Validate
+          id: validate
+          run: terraform validate -no-color
+
+        - name: Terraform Plan
+          id: plan
+          continue-on-error: true
+          run: |
+            terraform plan -input=false -no-color \
+              -var-file=env/dev.tfvars \
+              -var="ssh_public_key=/home/runner/.ssh/id_ed25519.pub" \
+              -var="allow_ssh_from_cidr=${{ vars.ALLOW_SSH_FROM_CIDR }}" \
+              -out=tfplan
+
+        - name: Save plan output
+          env:
+            PLAN_TEXT: ${{ steps.plan.outputs.stdout }}
+          run: printf '%s\n' "$PLAN_TEXT" > tfplan.txt
+
+        - name: Upload plan artifact
+          uses: actions/upload-artifact@v4
+          with:
+            name: terraform-plan-${{ github.event.pull_request.number }}
+            path: |
+              infra/tfplan
+              infra/tfplan.txt
+            if-no-files-found: error
+
+        - name: Comment PR with plan
+          if: github.event_name == 'pull_request'
+          uses: actions/github-script@v7
+          env:
+            FMT_STATUS: ${{ steps.fmt.outcome }}
+            INIT_STATUS: ${{ steps.init.outcome }}
+            VALIDATE_STATUS: ${{ steps.validate.outcome }}
+            PLAN_STATUS: ${{ steps.plan.outcome }}
+            PLAN_TEXT: ${{ steps.plan.outputs.stdout }}
+          with:
+            github-token: ${{ secrets.GITHUB_TOKEN }}
+            script: |
+              const plan = process.env.PLAN_TEXT || '';
+              const truncated = plan.length > 60000 ? plan.slice(0, 60000) +
+  '\n\n[truncated]' : plan;
+              const body = `## Terraform CI
+
+              - fmt: ${process.env.FMT_STATUS}
+              - init: ${process.env.INIT_STATUS}
+              - validate: ${process.env.VALIDATE_STATUS}
+              - plan: ${process.env.PLAN_STATUS}
+
+              <details>
+              <summary>Terraform plan</summary>
+
+              \`\`\`terraform
+              ${truncated}
+              \`\`\`
+
+              </details>`;
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const existing = comments.find(
+                c => c.user.type === 'Bot' && c.body.includes('## Terraform CI')
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body
+                });
+              }
+
+        - name: Fail if plan failed
+          if: steps.plan.outcome == 'failure'
+          run: exit 1
+
+    apply:
+      if: github.event_name == 'workflow_dispatch'
+      runs-on: ubuntu-latest
+      environment: azure-dev
+
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+
+        - name: Setup Terraform
+          uses: hashicorp/setup-terraform@v3
+          with:
+            terraform_version: 1.6.6
+
+        - name: Azure Login (OIDC)
+          uses: azure/login@v2
+          with:
+            client-id: ${{ secrets.AZURE_CLIENT_ID }}
+            tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+            subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+        - name: Materialize SSH public key
+          run: |
+            mkdir -p /home/runner/.ssh
+            printf '%s\n' "${{ secrets.SSH_PUBLIC_KEY }}" > /home/runner/.ssh/
+  id_ed25519.pub
+            chmod 600 /home/runner/.ssh/id_ed25519.pub
+
+        - name: Terraform Init
+          run: terraform init -input=false -backend-config=backend.hcl
+
+        - name: Terraform Plan
+          run: |
+            terraform plan -input=false -no-color \
+              -var-file=env/dev.tfvars \
+              -var="ssh_public_key=/home/runner/.ssh/id_ed25519.pub" \
+              -var="allow_ssh_from_cidr=${{ vars.ALLOW_SSH_FROM_CIDR }}" \
+              -out=tfplan
+
+        - name: Terraform Apply
+          run: terraform apply -input=false -auto-approve tfplan
